@@ -410,16 +410,32 @@ function initPlayer(videoUrl) {
 
     // 配置HLS.js选项
     const hlsConfig = {
-  debug: false,
-  loader: adFilteringEnabled ? CustomHlsJsLoader : Hls.DefaultConfig.loader,
-  enableWorker: true,
-  lowLatencyMode: true, // 开启低延迟模式（适配电影天堂流）
-  backBufferLength: 30, // 减少缓冲，避免加载卡住
-  maxBufferHole: 1.0, // 放宽缓冲限制，兼容不稳定流
-  fragLoadingMaxRetry: 10, // 增加重试次数，防止加载失败
-  fragLoadingRetryDelay: 2000, // 延长重试间隔
-  // 保留原来的其他配置（如果有的话，比如maxBufferLength等，直接加在这里）
-};
+        debug: false,
+        loader: adFilteringEnabled ? CustomHlsJsLoader : Hls.DefaultConfig.loader,
+        enableWorker: true,
+        lowLatencyMode: false,
+        backBufferLength: 90,
+        maxBufferLength: 30,
+        maxMaxBufferLength: 60,
+        maxBufferSize: 30 * 1000 * 1000,
+        maxBufferHole: 0.5,
+        fragLoadingMaxRetry: 6,
+        fragLoadingMaxRetryTimeout: 64000,
+        fragLoadingRetryDelay: 1000,
+        manifestLoadingMaxRetry: 3,
+        manifestLoadingRetryDelay: 1000,
+        levelLoadingMaxRetry: 4,
+        levelLoadingRetryDelay: 1000,
+        startLevel: -1,
+        abrEwmaDefaultEstimate: 500000,
+        abrBandWidthFactor: 0.95,
+        abrBandWidthUpFactor: 0.7,
+        abrMaxWithRealBitrate: true,
+        stretchShortVideoTrack: true,
+        appendErrorMaxRetry: 5,  // 增加尝试次数
+        liveSyncDurationCount: 3,
+        liveDurationInfinity: false
+    };
 
     // Create new ArtPlayer instance
     art = new Artplayer({
@@ -516,16 +532,22 @@ function initPlayer(videoUrl) {
                 });
 
                 hls.on(Hls.Events.ERROR, function (event, data) {
-  errorCount++;
-  console.error('HLS错误:', data); // 输出错误日志（方便排查）
-  
-  // 针对电影天堂常见的403/404错误，强制重新加载
-  if (data.type === Hls.ErrorTypes.NETWORK_ERROR && 
-      [403, 404].includes(data.details?.response?.status)) {
-    console.log('检测到访问错误，尝试重新加载视频');
-    hls.startLoad(); // 强制刷新视频
-  }
-  
+                    // 增加错误计数
+                    errorCount++;
+
+                    // 处理bufferAppendError
+                    if (data.details === 'bufferAppendError') {
+                        bufferAppendErrorCount++;
+                        // 如果视频已经开始播放，则忽略这个错误
+                        if (playbackStarted) {
+                            return;
+                        }
+
+                        // 如果出现多次bufferAppendError但视频未播放，尝试恢复
+                        if (bufferAppendErrorCount >= 3) {
+                            hls.recoverMediaError();
+                        }
+                    }
 
                     // 如果是致命错误，且视频未播放
                     if (data.fatal && !playbackStarted) {
